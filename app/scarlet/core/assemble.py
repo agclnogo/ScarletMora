@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import csv
 import os
+from types import SimpleNamespace
 
 import numpy as np
 
 from . import kana as K
-from .audio import read_audio, write_wav
+from .audio import read_audio, resample, write_wav
 from .bank import load_all
 from .plan import _score, _substitutes
 
@@ -233,3 +234,181 @@ def assemble(out_dir: str, src_dir: str, lyrics_path: str, dst: str = "render",
         "duration": len(full) / sr_used, "dir": out_dir_full,
         "missing": missing_total, "subs": sub_total,
     }
+
+
+# ====================================================================== 拼句子
+# edit.json の items（source / start / end / kind / lead）を直接レンダリングする。
+# 「拼句子」タブの試聴と書き出しは両方ここを通すので、音の作り方が一致する。
+
+def _item_missing(it: dict) -> bool:
+    return (not str(it.get("source") or "").strip()) or (it.get("kind") == "missing")
+
+
+def _source_audio(cache: dict, src_dir: str, source: str):
+    key = str(source or "")
+    if key not in cache:
+        cache[key] = read_audio(os.path.join(src_dir, key + ".wav"))
+    return cache[key]
+
+
+def render_items(items: list[dict], src_dir: str, head: float = 0.008,
+                 tail: float = 0.015, fade_ms: float = 5.0,
+                 crossfade_ms: float = 8.0, target_db: float = -18.0,
+                 slot: float = 0.22, cache: dict | None = None,
+                 sr_out: int | None = None
+                 ) -> tuple[np.ndarray, int, list[dict]]:
+    """items 1 本ぶんを波形にする。
+
+    item: {"mora","source","start","end","kind","sub_from","lead",...}
+      lead … 直前の音との間に空ける無音（秒）。0 ならクロスフェードで繋ぐ。
+    戻り値: (audio, sr, 各 item の out_start/out_end 付きメタ)
+    """
+    cache = cache if cache is not None else {}
+    items = list(items or [])
+
+    if sr_out:
+        sr_out = int(sr_out)
+    else:
+        sr_out = 44100
+        for it in items:
+            if not _item_missing(it):
+                try:
+                    sr_out = int(_source_audio(cache, src_dir, it["source"]).sr) or 44100
+                    break
+                except Exception:
+                    continue
+
+    xf = int(max(0.0, crossfade_ms) / 1000 * sr_out)
+    segs: list[np.ndarray] = []
+    for it in items:
+        if _item_missing(it):
+            segs.append(np.zeros(max(1, int(slot * sr_out)), dtype=np.float32))
+            continue
+        try:
+            au = _source_audio(cache, src_dir, it["source"])
+            a = float(it.get("start") or 0.0)
+            b = float(it.get("end") or 0.0)
+            if b <= a:
+                seg = np.zeros(1, dtype=np.float32)
+            else:
+                seg = _cut(au, SimpleNamespace(start=a, end=b), head, tail, au.sr)
+                if au.sr != sr_out:
+                    seg = resample(seg, au.sr, sr_out)
+        except Exception:
+            seg = np.zeros(max(1, int(slot * sr_out)), dtype=np.float32)
+        if len(seg) == 0:
+            seg = np.zeros(1, dtype=np.float32)
+        segs.append(np.asarray(seg, dtype=np.float32).copy())
+
+    if not segs:
+        return np.zeros(1, dtype=np.float32), sr_out, []
+
+    leads = [max(0.0, float(it.get("lead") or 0.0)) for it in items]
+    total = (sum(len(s) for s in segs) + xf * 4
+             + sum(int(lead * sr_out) for lead in leads) + 64)
+    out = np.zeros(max(1, total), dtype=np.float32)
+
+    cursor = 0
+    meta: list[dict] = []
+    for i, (it, seg) in enumerate(zip(items, segs)):
+        missing = _item_missing(it)
+        prev_missing = i > 0 and _item_missing(items[i - 1])
+        xf_here = xf if (i > 0 and not missing and not prev_missing
+                         and leads[i] <= 0) else 0
+        start = 0 if i == 0 else max(0, cursor - xf_here)
+        if i > 0 and leads[i] > 0:
+            start = cursor + int(leads[i] * sr_out)
+            xf_here = 0
+
+        seg = seg.copy()
+        if i == 0:
+            seg = _fade_in(seg, sr_out, max(fade_ms, 2.0))
+        if i == len(segs) - 1:
+            seg = _fade_out(seg, sr_out, max(fade_ms, 8.0))
+        if not missing:
+            seg = _normalize(seg, target_db)
+        _place(out, seg, start, xf_here)
+
+        row = dict(it)
+        row.update({
+            "out_start": round(start / sr_out, 3),
+            "out_end": round((start + len(seg)) / sr_out, 3),
+            "missing": missing,
+        })
+        meta.append(row)
+        cursor = start + len(seg)
+
+    return out[:cursor], sr_out, meta
+
+
+def render_edit(out_dir: str, src_dir: str, tracks: list[dict], dst: str = "render",
+                head: float = 0.008, tail: float = 0.015, fade_ms: float = 5.0,
+                crossfade_ms: float = 8.0, target_db: float = -18.0,
+                slot: float = 0.22, line_gap: float = 0.45) -> dict:
+    """edit.json の tracks を書き出す。出力は assemble() と同じ形。"""
+    out_dir_full = os.path.join(out_dir, dst)
+    os.makedirs(out_dir_full, exist_ok=True)
+
+    cache: dict = {}
+    timeline: list[dict] = []
+    renders: list[np.ndarray] = []
+    sr_used = 44100
+    missing_total: dict[str, int] = {}
+    sub_total: dict[str, int] = {}
+    lines = 0
+
+    for ln, tr in enumerate(tracks or [], 1):
+        items = list((tr or {}).get("items") or [])
+        if not items:
+            continue
+        arr, sr, metas = render_items(
+            items, src_dir, head=head, tail=tail, fade_ms=fade_ms,
+            crossfade_ms=crossfade_ms, target_db=target_db, slot=slot, cache=cache,
+            sr_out=None if lines == 0 else sr_used)
+        sr_used = sr
+        lines += 1
+        write_wav(os.path.join(out_dir_full, f"line{ln:03d}.wav"), arr, sr)
+        renders.append(arr)
+        renders.append(np.zeros(int(line_gap * sr), dtype=np.float32))
+
+        for it, mm in zip(items, metas):
+            kind = it.get("kind") or ("missing" if mm.get("missing") else "ok")
+            mora = str(it.get("mora") or "")
+            conf = it.get("conf", "")
+            if isinstance(conf, (int, float)):
+                conf = round(float(conf), 2)
+            if mm.get("missing"):
+                missing_total[mora] = missing_total.get(mora, 0) + 1
+            elif kind == "sub":
+                key = mora + "→" + str(it.get("sub_from") or "")
+                sub_total[key] = sub_total.get(key, 0) + 1
+            timeline.append({
+                "line": ln, "idx": len(timeline) + 1, "mora": mora,
+                "kind": kind,
+                "source": "" if mm.get("missing") else str(it.get("source") or ""),
+                "src_start": "" if mm.get("missing") else round(float(it.get("start") or 0), 3),
+                "src_end": "" if mm.get("missing") else round(float(it.get("end") or 0), 3),
+                "conf": conf,
+                "sub_from": it.get("sub_from", ""),
+                "out_start": mm["out_start"],
+                "out_end": mm["out_end"],
+            })
+
+    full = np.concatenate(renders) if renders else np.zeros(1, dtype=np.float32)
+    write_wav(os.path.join(out_dir_full, "all.wav"), full, sr_used)
+
+    with open(os.path.join(out_dir, "timeline.csv"), "w",
+              encoding="utf-8-sig", newline="") as f:
+        fields = ["line", "idx", "mora", "kind", "source", "src_start", "src_end",
+                  "conf", "sub_from", "out_start", "out_end"]
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for row in timeline:
+            w.writerow(row)
+
+    return {
+        "lines": lines, "segments": len(timeline),
+        "duration": len(full) / sr_used, "dir": out_dir_full,
+        "missing": missing_total, "subs": sub_total,
+    }
+

@@ -33,7 +33,7 @@ def cmd_align(a) -> int:
     model_dir = a.model or paths.default_model_dir()
     if not os.path.isdir(model_dir):
         emit(f"ERROR モデルが無い: {model_dir}")
-        emit("ERROR `ScarletPhoneme\\models` にモデルを置くか、--model で指定して")
+        emit("ERROR `ScarletMora\\models` にモデルを置くか、--model で指定して")
         return 2
 
     want = [s for s in (a.only or "").split(",") if s.strip()]

@@ -14,6 +14,12 @@ dist/
 *.spec
 *.exe
 *.exe.bak
+*.zip
+*.7z
+*.rar
+
+# 解压出来的发布目录
+ScarletMora-*/
 
 # ---------- 本机数据 / 大文件（不进仓库） ----------
 libraries/
@@ -37,6 +43,7 @@ screen.png
 app_win.png
 crop_btn.png
 报错.png
+bug.png
 
 # ---------- 系统 ----------
 Thumbs.db

@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 >nul
 rem ============================================================================
-rem  ScarletPhoneme 打包脚本
+rem  ScarletMora 打包脚本
 rem
 rem  双击本文件即可，或在命令行里：  build.bat
 rem
 rem  做的事情：
-rem    app\main.py 做入口，产出一份 ScarletPhoneme.exe（单文件、无控制台窗口）
+rem    app\main.py 做入口，产出一份 ScarletMora.exe（单文件、无控制台窗口）
 rem
 rem  要点（改的时候别丢）：
 rem    --collect-data sudachidict_core   kana.py 用 sudachi 分词，词典是数据文件，
@@ -37,13 +37,13 @@ if errorlevel 1 (
 )
 
 echo     备份旧的 exe ...
-if exist ScarletPhoneme.exe (
-    copy /y ScarletPhoneme.exe ScarletPhoneme.exe.bak >nul
+if exist ScarletMora.exe (
+    copy /y ScarletMora.exe ScarletMora.exe.bak >nul
 )
 
 echo [2/3] 打包中（2~4 分钟）...
 "%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
-    --name ScarletPhoneme ^
+    --name ScarletMora ^
     --distpath . --workpath build\work --specpath build ^
     --paths app ^
     --collect-data sudachidict_core ^
@@ -68,7 +68,7 @@ if errorlevel 1 (
 
 echo [3/3] 自检 ...
 if exist logs\selftest.txt del /q logs\selftest.txt
-"%~dp0ScarletPhoneme.exe" --selftest
+"%~dp0ScarletMora.exe" --selftest
 echo.
 type logs\selftest.txt
 findstr /c:"SELFTEST OK" logs\selftest.txt >nul

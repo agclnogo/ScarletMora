@@ -11,7 +11,7 @@ import os
 import shutil
 import sys
 
-APP_NAME = "ScarletPhoneme"
+APP_NAME = "ScarletMora"
 SETTINGS_NAME = "settings.json"
 
 
@@ -20,7 +20,7 @@ def is_frozen() -> bool:
 
 
 def app_root() -> str:
-    """exe（または ScarletPhoneme フォルダ）の場所。データはここに置く。"""
+    """exe（または ScarletMora フォルダ）の場所。データはここに置く。"""
     if is_frozen():
         return os.path.dirname(os.path.abspath(sys.executable))
     here = os.path.dirname(os.path.abspath(__file__))

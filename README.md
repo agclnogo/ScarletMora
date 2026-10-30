@@ -1,9 +1,11 @@
-# ScarletPhoneme
+# ScarletMora
 
 音素裁切音库管理器 —— 素材 → 强制对齐 → 切点校对 → モーラ切片 → 拼接。
 
-Windows 桌面程序，Python + Tkinter 编写，单窗口，三个主标签：
-**切点校对** / **音库索引** / **音库管理**。
+Windows 桌面程序，Python + Tkinter 编写，单窗口，四个主标签：
+**切点校对** / **音库索引** / **拼句子** / **音库管理**。
+
+当前版本：**1.1**（1.0 = 前三个主功能；1.1 新增「拼句子」）
 
 > 本仓库只放源码和构建脚本。exe、声学模型、个人音库都不进仓库，
 > 说明见下方「仓库里有什么 / 没有什么」。
@@ -25,6 +27,18 @@ Windows 桌面程序，Python + Tkinter 编写，单窗口，三个主标签：
 - 按音/母音浏览候选，可按「只看可疑」「只看句头」筛选，并显示干净候选数量
 - 候选表双击/空格试听
 - 波形预览：红框是候选切出来的范围，点哪从哪试听
+
+### 拼句子
+- 左边搜索音/母音，中间候选表，下边是时间轴，最下面是波形预览
+- 双击候选或拖到轨道上 = 加音；拖到最下面「＋ 拖到这里新建一轨」= 自动建轨
+- 拖音块中间 = 换位/跨轨；拖左右边缘 = 修剪来源的起点/终点；Delete 删除
+- 一句一行轨，多轨编辑；「＋ 新轨」按钮；吸附开关
+- 缩放滑块（0.05s～整轨）+ 滚轮缩放、Shift+滚轮平移
+- 点候选或音块，底部显示来源波形和红色切点框
+- ▶ 试听本轨：按当前编辑立刻渲染临时 wav 播放，播完可重播
+- 从歌词一键自动填充，再手工微调
+- 自动保存到 `libraries/<音库>/edit.json`，Ctrl+Z/Ctrl+Y 撤销重做
+- 导出 `render/*.wav` + `timeline.csv`，参数与「拼接成歌」一致
 
 ### 音库管理
 - 导入素材、预览匹配、再次导入 = 更新素材
@@ -115,7 +129,7 @@ pip install pyinstaller
 build.bat
 ```
 
-产物是根目录的 `ScarletPhoneme.exe`。
+产物是根目录的 `ScarletMora.exe`。
 
 注意：
 
@@ -130,15 +144,17 @@ build.bat
 app/
   main.py                入口（--selftest 也在这里）
   scarlet/
-    gui.py               主窗口 / 三个标签
+    gui.py               主窗口 / 四个标签
     review_win.py        切点校对
     bank_win.py          音库索引
+    assemble_win.py      拼句子（时间轴 / 拖放）
     waveview.py          波形绘制与鼠标操作
     player.py            Windows MCI 播放器
     library.py           音库读写
     importer.py          素材导入
     worker.py            外部 Python 分析入口
     core/                对齐、切片、拼接、导出、kana
+                          （拼句子用 assemble.render_items / render_edit）
 build.bat                打包脚本
 models/                  声学模型（不进仓库）
 libraries/               音库（不进仓库，首次运行生成）
@@ -147,6 +163,7 @@ logs/                    日志（不进仓库）
 ```
 
 首次运行会生成 `libraries\`、`logs\`、`settings.json`。
+拼句子的轨道存在 `libraries\<音库>\edit.json`。
 
 ---
 
@@ -164,7 +181,7 @@ logs/                    日志（不进仓库）
 
 | 内容 | 原因 | 去哪拿 |
 |---|---|---|
-| `ScarletPhoneme.exe`、`*.exe.bak` | 约 99MiB，接近 GitHub 单文件上限 | GitHub Releases |
+| `ScarletMora.exe`、`*.exe.bak` | 约 99MiB，接近 GitHub 单文件上限 | GitHub Releases |
 | `models/` | 约 361MB | 按上面的 Hugging Face 链接下载 |
 | `libraries/` | 个人音源和切点数据，可能涉及版权 | 自己导入 |
 | `workdir/` | 分析临时产物，可重建 | 运行时生成 |
@@ -178,7 +195,8 @@ logs/                    日志（不进仓库）
 
 - 点波形 = 移动播放头，并选中播放头所在的音
 - 拖底部假名带的竖线 = 改切点；吸附开着时左右两个音一起动
-- 空格 = 播放/暂停 · Ctrl+S = 保存 · Ctrl+Z = 撤销 · PageUp/PageDown = 换曲 · Ctrl+L = 日志
+- 拼句子：双击候选加音，拖到时间轴排顺序；空格试听本轨，Ctrl+S 保存
+- 空格 = 播放/暂停 · Ctrl+S = 保存 · Ctrl+Z = 撤销 · Ctrl+Y = 重做 · PageUp/PageDown = 换轨/换曲 · Ctrl+L = 日志
 
 ---
 
@@ -187,7 +205,7 @@ logs/                    日志（不进仓库）
 - 播放依赖 Windows MCI，只支持 wav
 - CTC 对齐需要本机 Python + torch/transformers，首次加载模型约 10–30 秒
 - 模型约 361MB，不随仓库分发
-- 「拼句子」功能尚未实现
+- 拼句子导出的淡入淡出/交叉淡化/响度参数暂固定为与「拼接成歌」相同
 
 ---
 

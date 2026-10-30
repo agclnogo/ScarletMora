@@ -43,9 +43,11 @@ from .core import bank as B
 from .core import kana as K
 from .core import plan as P
 from .core import export as E
+from .core.audio import write_wav
 from .core.store import read_marks
 
 MANIFEST = "library.json"
+EDIT_NAME = "edit.json"
 SCHEMA = 1
 SUBDIRS = ("audio", "marks", "labels", "clips", "clips_all", "render", "plan")
 AUDIO_EXTS = (".wav",)
@@ -403,6 +405,48 @@ class Library:
         return A.assemble(self.path, self.audio_dir, lyrics_path, dst=dst, head=head,
                           tail=tail, crossfade_ms=crossfade_ms, target_db=target_db,
                           slot=slot, allow_sub=allow_sub)
+
+    # ------------------------------------------------------------ 拼句子 edit
+    @property
+    def edit_path(self) -> str:
+        return os.path.join(self.path, EDIT_NAME)
+
+    def load_edit(self) -> dict:
+        """edit.json（拼句子のトラック）を読む。無ければ空で返す。"""
+        try:
+            with open(self.edit_path, encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except Exception:
+            data = {}
+        if not isinstance(data.get("tracks"), list):
+            data["tracks"] = []
+        data.setdefault("schema", 1)
+        data.setdefault("updated", "")
+        return data
+
+    def save_edit(self, data: dict) -> str:
+        self.ensure_dirs()
+        data = dict(data or {})
+        data.setdefault("schema", 1)
+        data["updated"] = now()
+        tmp = self.edit_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.edit_path)
+        return self.edit_path
+
+    def render_edit(self, edit: dict, dst: str = "render", **kw) -> dict:
+        """edit.json のトラックを書き出す（assemble と同じ render/*.wav + timeline.csv）。"""
+        return A.render_edit(self.path, self.audio_dir,
+                             (edit or {}).get("tracks") or [], dst=dst, **kw)
+
+    def preview_track(self, items: list[dict], name: str = "_preview.wav",
+                      **kw) -> tuple[str, float]:
+        """1 本ぶんを一時 wav にする。試聴用。"""
+        path = os.path.join(self.path, "render", name)
+        arr, sr, _meta = A.render_items(items, self.audio_dir, **kw)
+        write_wav(path, arr, sr)
+        return path, len(arr) / sr
 
     # ---------------------------------------------------------------- 編集
     def remove_track(self, name: str, delete_audio: bool = True) -> None:

@@ -1,4 +1,4 @@
-"""ScarletPhoneme のメインウィンドウ。
+"""ScarletMora のメインウィンドウ。
 
 黒地に緋色。上が音庫バー、その下に大きなタブ 3 つ
 （切点校对 / 音库索引 / 音库管理）。主要 2 機能はこの窓の中に直接出る。
@@ -20,16 +20,18 @@ from tkinter.scrolledtext import ScrolledText
 
 from . import importer, paths
 from . import theme as T
+from .assemble_win import AssemblePane
 from .bank_win import BankPane
 from .library import Library
 from .review_win import ReviewPane
 
-APP_TITLE = "ScarletPhoneme"
+APP_TITLE = "ScarletMora"
 SUB = "音素裁切音库管理器"
 
 TABS = (
     ("review", "切点校对", "改切点 / 试听"),
     ("bank", "音库索引", "按音试听"),
+    ("assemble", "拼句子", "拖放拼句 / 导出"),
     ("manage", "音库管理", "导入 / 分析 / 导出"),
 )
 
@@ -65,6 +67,8 @@ class App(tk.Tk):
         self.after(120, self._pump)
         self.bind("<Control-s>", lambda _e: self._key("save"))
         self.bind("<Control-z>", lambda _e: self._key("undo"))
+        self.bind("<Control-y>", lambda _e: self._key("redo"))
+        self.bind("<Control-Shift-Z>", lambda _e: self._key("redo"))
         self.bind("<space>", lambda _e: self._key("space"))
         self.bind("<Prior>", lambda _e: self._key("prev_file"))
         self.bind("<Next>", lambda _e: self._key("next_file"))
@@ -76,7 +80,7 @@ class App(tk.Tk):
         head = tk.Frame(self, bg=T.BG0)
         head.pack(fill="x", padx=16, pady=(12, 8))
         tk.Label(head, text="●", bg=T.BG0, fg=T.SCARLET, font=("Arial", 16)).pack(side="left")
-        tk.Label(head, text=" ScarletPhoneme", bg=T.BG0, fg=T.FG,
+        tk.Label(head, text=" ScarletMora", bg=T.BG0, fg=T.FG,
                  font=("Microsoft YaHei UI", 17, "bold")).pack(side="left")
 
         T.ScarletButton(head, "帮助", self.about, kind="flat").pack(side="right")
@@ -154,6 +158,8 @@ class App(tk.Tk):
         p = self._panes.get(self.tab)
         if self.tab == "review" and p is not None and not p.can_leave():
             return False
+        if self.tab == "assemble" and p is not None and not p.can_leave():
+            return False
         return True
 
     def _pane(self, key: str) -> tk.Frame | None:
@@ -174,6 +180,10 @@ class App(tk.Tk):
             if not self.lib.tracks:
                 return None
             p = BankPane(self.host, self.lib, log=self.log)
+        elif key == "assemble":
+            if not self.lib.tracks:
+                return None
+            p = AssemblePane(self.host, self.lib, log=self.log, app=self)
         else:
             p = ManagePane(self.host, self, self.lib)
         self._panes[key] = p
@@ -195,6 +205,9 @@ class App(tk.Tk):
         bank = self._panes.get("bank")
         if bank is not None and bank.winfo_exists():
             bank.reload()
+        asm = self._panes.get("assemble")
+        if asm is not None and asm.winfo_exists():
+            asm.reload_candidates()
         manage = self._panes.get("manage")
         if manage is not None and manage.winfo_exists():
             manage.refresh()
@@ -208,6 +221,12 @@ class App(tk.Tk):
                                        sub=f"{st['tracks']} 曲 / {st['mora_total']} 音")
         self.tabs["bank"].set_active(self.tab == "bank",
                                      sub=f"{st['mora_kind']} 种 / 可疑 {st['flagged']}")
+        try:
+            n_line = len(self.lib.load_edit().get("tracks") or [])
+        except Exception:
+            n_line = 0
+        self.tabs["assemble"].set_active(
+            self.tab == "assemble", sub=f"{n_line} 句" if n_line else "拖放拼句")
         self.tabs["manage"].set_active(self.tab == "manage", sub=self.lib.name)
 
     # ------------------------------------------------------------------ 鍵
@@ -229,6 +248,19 @@ class App(tk.Tk):
                 p.step_file(-1)
             elif action == "next_file":
                 p.step_file(1)
+        elif self.tab == "assemble":
+            if action == "space":
+                p.toggle_preview()
+            elif action == "save":
+                p.save()
+            elif action == "undo":
+                p.undo()
+            elif action == "redo":
+                p.redo()
+            elif action == "prev_file":
+                p.step_track(-1)
+            elif action == "next_file":
+                p.step_track(1)
         elif self.tab == "bank" and action == "space":
             p.play_selected()
         return "break"
@@ -664,7 +696,7 @@ class App(tk.Tk):
         messagebox.showinfo(
             "关于", f"{APP_TITLE} {__version__}\n{SUB}\n\n"
                     "素材 → 强制对齐 → 切点校对 → 切片 → 拼接\n"
-                    "快捷键：空格 播放/暂停 · Ctrl+S 保存 · Ctrl+Z 撤销 · "
+                    "快捷键：空格 播放/暂停 · Ctrl+S 保存 · Ctrl+Z 撤销 · Ctrl+Y 重做 · "
                     "PageUp/PageDown 换曲 · Ctrl+L 日志\n\n"
                     f"数据目录: {paths.app_root()}",
             parent=self)
@@ -795,7 +827,7 @@ class ManagePane(tk.Frame):
 class LogWindow(tk.Toplevel):
     def __init__(self, master, lines: list[str]):
         super().__init__(master, bg=T.BG0)
-        self.title("日志 · ScarletPhoneme")
+        self.title("日志 · ScarletMora")
         self.geometry("760x460")
         self.transient(master)
         T.dark_titlebar(self)
@@ -1079,7 +1111,7 @@ def selftest() -> int:
             app = App()
             app.update_idletasks()
             app.update()
-            for key in ("review", "bank", "manage"):
+            for key in ("review", "bank", "assemble", "manage"):
                 app.show_tab(key, force=True)
                 app.update_idletasks()
                 app.update()
@@ -1126,6 +1158,38 @@ def selftest() -> int:
             bk = app._panes.get("bank")
             if bk is not None:
                 say(f"  bank takes={len(bk.rows)} kinds={len(bk.by_mora)}")
+            asm = app._panes.get("assemble")
+            if asm is not None:
+                say(f"  assemble tracks={len(asm.tracks)} kinds={len(asm.by_mora)}")
+                if asm.by_mora:
+                    try:
+                        from .core import assemble as A
+                        cand = next(iter(asm.by_mora.values()))[0]
+                        item = {"mora": cand["mora"], "source": cand["source"],
+                                "start": cand["start"], "end": cand["end"],
+                                "kind": "ok", "lead": 0.0}
+                        arr, sr, meta = A.render_items([item, item], asm.lib.audio_dir)
+                        ok3 = len(arr) > 1 and sr > 0 and len(meta) == 2
+                        say(f"  assemble render {'ok' if ok3 else 'FAIL'} "
+                            f"{len(arr) / max(1, sr):.2f}s @ {sr}Hz")
+                        ok_all = ok_all and ok3
+                        ok4 = asm.wave.duration > 0
+                        say(f"  assemble wave {'ok' if ok4 else 'FAIL'}")
+                        ok_all = ok_all and ok4
+                        d0 = asm._t1 - asm._t0
+                        asm._on_zoom(1.0, 1.0)
+                        d1 = asm._t1 - asm._t0
+                        asm._fit()
+                        ok5 = d1 < d0
+                        say(f"  assemble zoom {'ok' if ok5 else 'FAIL'} "
+                            f"{d0:.2f}s -> {d1:.2f}s")
+                        ok_all = ok_all and ok5
+                        say(f"  edit.json path: {asm.lib.edit_path}")
+                    except Exception as e:  # noqa: BLE001
+                        ok_all = False
+                        say(f"  assemble render FAIL {type(e).__name__}: {e}")
+                else:
+                    say("  assemble candidates: none")
             app._drop_panes()
             app.destroy()
         except Exception as e:  # noqa: BLE001
