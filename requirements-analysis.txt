@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# CTC 强制对齐：由外部 Python 运行 app/scarlet/worker.py
+# Windows 想装纯 CPU 版 torch，可先执行：
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+transformers>=4.40

@@ -1,0 +1,7 @@
+# GUI / 切点校对 / 音库索引运行所需
+numpy>=1.24
+sudachipy>=0.6.8
+sudachidict_core
+
+# 可选：读取 wav 以外的音频格式（wav 用标准库 wave 即可）
+soundfile>=0.12

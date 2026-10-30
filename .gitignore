@@ -1,0 +1,44 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ---------- 打包产物 ----------
+build/
+dist/
+*.spec
+*.exe
+*.exe.bak
+
+# ---------- 本机数据 / 大文件（不进仓库） ----------
+libraries/
+models/
+workdir/
+logs/
+settings.json
+
+# ---------- 音源（防止误传版权素材） ----------
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.aac
+*.ogg
+
+# ---------- 临时文件 / 调试截图 ----------
+*.log
+*.tmp
+screen.png
+app_win.png
+crop_btn.png
+报错.png
+
+# ---------- 系统 ----------
+Thumbs.db
+desktop.ini
+.DS_Store
