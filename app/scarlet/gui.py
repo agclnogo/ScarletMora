@@ -31,7 +31,7 @@ SUB = "音素裁切音库管理器"
 TABS = (
     ("review", "切点校对", "改切点 / 试听"),
     ("bank", "音库索引", "按音试听"),
-    ("assemble", "拼句子", "拖放拼句 / 导出"),
+    ("assemble", "人力试作", "编排 / 试听 / 导出"),
     ("manage", "音库管理", "导入 / 分析 / 导出"),
 )
 
@@ -226,7 +226,7 @@ class App(tk.Tk):
         except Exception:
             n_line = 0
         self.tabs["assemble"].set_active(
-            self.tab == "assemble", sub=f"{n_line} 句" if n_line else "拖放拼句")
+            self.tab == "assemble", sub=f"{n_line} 句" if n_line else "编排 / 试听")
         self.tabs["manage"].set_active(self.tab == "manage", sub=self.lib.name)
 
     # ------------------------------------------------------------------ 鍵
@@ -696,8 +696,10 @@ class App(tk.Tk):
         messagebox.showinfo(
             "关于", f"{APP_TITLE} {__version__}\n{SUB}\n\n"
                     "素材 → 强制对齐 → 切点校对 → 切片 → 拼接\n"
+                    "主功能：切点校对 · 音库索引 · 人力试作 · 音库管理\n"
                     "快捷键：空格 播放/暂停 · Ctrl+S 保存 · Ctrl+Z 撤销 · Ctrl+Y 重做 · "
                     "PageUp/PageDown 换曲 · Ctrl+L 日志\n\n"
+                    "https://github.com/agclnogo/ScarletMora\n"
                     f"数据目录: {paths.app_root()}",
             parent=self)
 
@@ -1120,6 +1122,16 @@ def selftest() -> int:
             rv = app._panes.get("review")
             if rv is not None:
                 say(f"  review marks={len(rv.marks)}")
+                try:
+                    from .core import kana as K
+                    kids = rv.tbl.get_children()
+                    ok_rl = bool(kids) and str(rv.tbl.item(kids[0], "values")[1]) \
+                        == K.mora_label(rv.marks[0].mora)
+                    say(f"  review table romaji {'ok' if ok_rl else 'FAIL'}")
+                    ok_all = ok_all and ok_rl
+                except Exception as e:  # noqa: BLE001
+                    ok_all = False
+                    say(f"  review table romaji FAIL {type(e).__name__}: {e}")
                 # 波形の当たり判定: 本体=再生位置だけ / 音名帯の線=切点ドラッグ
                 try:
                     app.show_tab("review", force=True)
@@ -1162,8 +1174,18 @@ def selftest() -> int:
             if asm is not None:
                 say(f"  assemble tracks={len(asm.tracks)} kinds={len(asm.by_mora)}")
                 if asm.by_mora:
+                    import copy as _copy
+                    from types import SimpleNamespace as _NS
+
+                    from .core import assemble as A
+                    from .core import kana as K
+
+                    snap = _copy.deepcopy(asm.tracks)
+                    undo0, redo0 = _copy.deepcopy(asm._undo), _copy.deepcopy(asm._redo)
+                    dirty0 = asm.dirty
+                    view0 = (asm._t0, asm._t1)
+                    sel0, cur0, ph0 = asm.sel, asm.cur, asm._playhead
                     try:
-                        from .core import assemble as A
                         cand = next(iter(asm.by_mora.values()))[0]
                         item = {"mora": cand["mora"], "source": cand["source"],
                                 "start": cand["start"], "end": cand["end"],
@@ -1173,21 +1195,239 @@ def selftest() -> int:
                         say(f"  assemble render {'ok' if ok3 else 'FAIL'} "
                             f"{len(arr) / max(1, sr):.2f}s @ {sr}Hz")
                         ok_all = ok_all and ok3
+
+                        ly = [m.text for m in K.lyric_to_moras("a i shi te ru")]
+                        ly2 = [m.text for m in K.lyric_to_moras("あいしてる")]
+                        ly3 = [m.text for m in K.lyric_to_moras(
+                            "a i shi te ru / あいしてる")]
+                        ok_ly = (ly == ly2 == ly3 == list("あいしてる"))
+                        say(f"  lyric romaji/kana {'ok' if ok_ly else 'FAIL'} "
+                            f"{''.join(ly)}")
+                        ok_all = ok_all and ok_ly
+                        ok_lab = (K.mora_label("な") == "な(na)"
+                                  and K.mora_label("しゃ") == "しゃ(sha)")
+                        say(f"  mora romaji label {'ok' if ok_lab else 'FAIL'}")
+                        ok_all = ok_all and ok_lab
+
+                        ok_ly2 = (
+                            [m.text for m in K.lyric_to_moras("onna")] == list("おんな")
+                            and [m.text for m in K.lyric_to_moras("konnyaku")]
+                            == ["こ", "ん", "にゃ", "く"]
+                            and [m.text for m in K.lyric_to_moras("shin'you")]
+                            == list("しんよう")
+                            and [m.text for m in K.lyric_to_moras("tōkyō")]
+                            == ["と", "う", "きょ", "う"])
+                        say(f"  lyric nn/n'/macron {'ok' if ok_ly2 else 'FAIL'}")
+                        ok_all = ok_all and ok_ly2
+
+                        ok_val = (K.lyric_problem("a i shi te ru / あいしてる") == ""
+                                  and K.lyric_problem("愛してる") != ""
+                                  and K.lyric_problem("abc123") != "")
+                        say(f"  lyric kana/romaji only {'ok' if ok_val else 'FAIL'}")
+                        ok_all = ok_all and ok_val
+
+                        # at（絶対配置）が効くか
+                        item_at = dict(item, at=0.5)
+                        arr_at, sr_at, meta_at = A.render_items(
+                            [item_at], asm.lib.audio_dir)
+                        ok_at = bool(meta_at) and float(meta_at[0]["out_start"]) >= 0.49
+                        say(f"  assemble at-placement {'ok' if ok_at else 'FAIL'} "
+                            f"{meta_at[0]['out_start'] if meta_at else '-'}s")
+                        ok_all = ok_all and ok_at
+
                         ok4 = asm.wave.duration > 0
-                        say(f"  assemble wave {'ok' if ok4 else 'FAIL'}")
+                        say(f"  assemble source-wave {'ok' if ok4 else 'FAIL'}")
                         ok_all = ok_all and ok4
+
+                        # Ctrl+滚轮相当: 中央を保ったまま縮小
                         d0 = asm._t1 - asm._t0
-                        asm._on_zoom(1.0, 1.0)
+                        cx = asm.t2x((asm._t0 + asm._t1) / 2)
+                        asm._zoom_at(0.5, cx)
                         d1 = asm._t1 - asm._t0
                         asm._fit()
                         ok5 = d1 < d0
                         say(f"  assemble zoom {'ok' if ok5 else 'FAIL'} "
                             f"{d0:.2f}s -> {d1:.2f}s")
                         ok_all = ok_all and ok5
+
+                        # 音块の裁剪（左 = start/at、右 = end）
+                        tr = {"name": "selftest", "text": "", "solo": False,
+                              "mute": False,
+                              "items": [{"mora": cand["mora"],
+                                         "source": cand["source"], "start": 1.0,
+                                         "end": 1.1, "kind": "ok", "lead": 0.0,
+                                         "at": 0.0, "conf": 1.0, "flags": ""}]}
+                        asm.tracks = [tr]
+                        asm.cur, asm.sel = 0, (0, 0)
+                        asm._t0, asm._t1 = 0.0, 2.0
+                        asm._ensure_positions()
+                        asm.redraw()
+                        dd = {"ti": 0, "ii": 0, "mode": "trim_l", "x": 0, "y": 0,
+                              "press_t": 0.0, "at0": 0.0, "start0": 1.0,
+                              "end0": 1.1, "src_dur": 10.0, "moved": False,
+                              "snap": _copy.deepcopy(asm.tracks)}
+                        asm._drag_trim(dd, _NS(x=asm.t2x(0.05)))
+                        it0 = asm.tracks[0]["items"][0]
+                        ok_tr = (float(it0["start"]) > 1.04
+                                 and abs(float(it0["at"]) - 0.05) < 0.02)
+                        say(f"  assemble trim-left {'ok' if ok_tr else 'FAIL'} "
+                            f"start={it0['start']} at={it0['at']}")
+                        ok_all = ok_all and ok_tr
+                        dd2 = {"ti": 0, "ii": 0, "mode": "trim_r", "x": 0, "y": 0,
+                               "press_t": 0.0, "at0": float(it0["at"]),
+                               "start0": float(it0["start"]), "end0": 1.1,
+                               "src_dur": 10.0, "moved": False,
+                               "snap": _copy.deepcopy(asm.tracks)}
+                        asm._drag_trim(dd2, _NS(x=asm.t2x(0.06)))
+                        it0 = asm.tracks[0]["items"][0]
+                        ok_tr2 = float(it0["end"]) > 1.15
+                        say(f"  assemble trim-right {'ok' if ok_tr2 else 'FAIL'} "
+                            f"end={it0['end']}")
+                        ok_all = ok_all and ok_tr2
+
+                        # 自由水平移动
+                        asm.tracks[0]["items"][0]["at"] = 0.0
+                        dm = {"ti": 0, "ii": 0, "mode": "move", "x": 0, "y": 0,
+                              "press_t": 0.0, "at0": 0.0, "start0": 1.0,
+                              "end0": 1.1, "src_dur": 10.0, "moved": True,
+                              "snap": _copy.deepcopy(asm.tracks)}
+                        asm._move_item_free(dm, 0, 0.75)
+                        ok_mv = abs(float(asm.tracks[0]["items"][0]["at"]) - 0.75) < 1e-3
+                        say(f"  assemble free-move {'ok' if ok_mv else 'FAIL'}")
+                        ok_all = ok_all and ok_mv
+
+                        # 単体試聴: at を wav に持ち込まない（ヘッドだけ先に走る不具合）
+                        if asm.player.available():
+                            pv = dict(item, at=1.5, start=1.0, end=1.1)
+                            asm.tracks = [{"name": "pv", "text": "", "solo": False,
+                                           "mute": False, "items": [pv]}]
+                            asm.cur, asm.sel = 0, (0, 0)
+                            asm._ensure_positions()
+                            asm._preview_item(0, 0)
+                            app.update_idletasks()
+                            app.update()
+                            time.sleep(0.08)
+                            plen = float(getattr(asm.player, "length", 0.0) or 0.0)
+                            ok_pv = 0.0 < plen < 0.5
+                            say(f"  assemble item-preview no-at "
+                                f"{'ok' if ok_pv else 'FAIL'} length={plen:.3f}s")
+                            ok_all = ok_all and ok_pv
+                            asm.stop_preview(quiet=True)
+
+                        # Solo / Mute の audible 判定
+                        trs = [{"solo": False, "mute": False},
+                               {"solo": True, "mute": False},
+                               {"solo": False, "mute": True}]
+                        ok_sm = (len(A.audible_tracks(trs)) == 1
+                                 and len(A.audible_tracks(trs[:1])) == 1
+                                 and len(A.audible_tracks(
+                                     [{"solo": False, "mute": True},
+                                      {"solo": False, "mute": False}])) == 1)
+                        say(f"  assemble solo/mute {'ok' if ok_sm else 'FAIL'}")
+                        ok_all = ok_all and ok_sm
+
+                        # 新規轨は一番上（表示 row 0）、空轨も残る
+                        n0 = len(asm.tracks)
+                        asm.add_track()
+                        ok_trk = (len(asm.tracks) == n0 + 1
+                                  and asm._display_row(len(asm.tracks) - 1) == 0
+                                  and not asm.tracks[-1]["items"])
+                        asm.undo()
+                        say(f"  assemble track-order {'ok' if ok_trk else 'FAIL'}")
+                        ok_all = ok_all and ok_trk
+
+                        # 自動填充（ダイアログ無しの部分）と書き出し
+                        af_tracks, af_miss, af_sub = asm._tracks_from_lines(
+                            ["a i shi te ru / あいしてる"])
+                        ok_af = (len(af_tracks) == 1
+                                 and len(af_tracks[0].get("items") or []) == 5)
+                        say(f"  assemble autofill {'ok' if ok_af else 'FAIL'} "
+                            f"items={len(af_tracks[0]['items']) if af_tracks else 0} "
+                            f"missing={af_miss} subs={af_sub}")
+                        ok_all = ok_all and ok_af
+                        import tempfile
+                        with tempfile.TemporaryDirectory() as td:
+                            exp_tracks = [
+                                {"name": "a", "solo": False, "mute": False,
+                                 "items": [dict(item, at=0.0)]},
+                                {"name": "b", "solo": False, "mute": True,
+                                 "items": [dict(item, at=0.5)]},
+                            ]
+                            rep = A.render_edit(td, asm.lib.audio_dir, exp_tracks)
+                            ok_ex = (rep["lines"] == 1
+                                     and os.path.isfile(os.path.join(td, "render",
+                                                                     "all.wav")))
+                            say(f"  assemble export {'ok' if ok_ex else 'FAIL'} "
+                                f"lines={rep['lines']} segs={rep['segments']}")
+                            ok_all = ok_all and ok_ex
+                    except Exception as e:  # noqa: BLE001
+                        ok_all = False
+                        say(f"  assemble edit FAIL {type(e).__name__}: {e}")
+                    finally:
+                        if asm._save_job is not None:
+                            try:
+                                asm.after_cancel(asm._save_job)
+                            except Exception:
+                                pass
+                            asm._save_job = None
+                        asm.tracks = snap
+                        asm._undo, asm._redo = undo0, redo0
+                        asm.dirty = dirty0
+                        asm.sel, asm.cur, asm._playhead = sel0, cur0, ph0
+                        asm._t0, asm._t1 = view0
+                        asm._ensure_positions()
+                        asm._recalc()
+                        asm._rebuild_mix()
+                        asm.redraw()
+                    try:
+                        ok6 = asm._mix_dur > 0 and asm._mix_arr is not None
+                        say(f"  assemble mix-wave {'ok' if ok6 else 'FAIL'} "
+                            f"{asm._mix_dur:.2f}s")
+                        ok_all = ok_all and ok6
+                        ok_fix = (asm.ruler.winfo_height() > 0
+                                  and asm.mix.winfo_height() > 0)
+                        say(f"  assemble fixed ruler/mix "
+                            f"{'ok' if ok_fix else 'FAIL'}")
+                        ok_all = ok_all and ok_fix
+                        ok_snap0 = (asm.snap is False
+                                    and asm.btn_snap.winfo_exists())
+                        say(f"  assemble snap-default-off "
+                            f"{'ok' if ok_snap0 else 'FAIL'}")
+                        ok_all = ok_all and ok_snap0
+                        ok_dbl = not asm.tbl.bind("<Double-Button-1>")
+                        say(f"  assemble no-dblclick-add {'ok' if ok_dbl else 'FAIL'}")
+                        ok_all = ok_all and ok_dbl
+                        ok_split = asm.split.winfo_height() > 0
+                        say(f"  assemble splitter {'ok' if ok_split else 'FAIL'}")
+                        ok_all = ok_all and ok_split
+                        vv = (asm._t0, asm._t1)
+                        asm._t0, asm._t1 = 0.0, 600.0
+                        asm._sync_pan()
+                        ok_pan = asm.pan._hi > 0
+                        asm._t0, asm._t1 = vv
+                        asm._sync_pan()
+                        asm.redraw()
+                        say(f"  assemble pan-at-zoomout {'ok' if ok_pan else 'FAIL'}")
+                        ok_all = ok_all and ok_pan
+                        if asm.player.available():
+                            asm._playhead = 0.0
+                            asm.play_mix()
+                            app.update_idletasks()
+                            app.update()
+                            time.sleep(0.08)
+                            asm.stop_preview(quiet=True)
+                            asm.play_mix()
+                            app.update_idletasks()
+                            app.update()
+                            time.sleep(0.08)
+                            asm.stop_preview(quiet=True)
+                            say("  assemble preview x2 ok")
+                        else:
+                            say("  assemble preview x2 skip (no MCI)")
                         say(f"  edit.json path: {asm.lib.edit_path}")
                     except Exception as e:  # noqa: BLE001
                         ok_all = False
-                        say(f"  assemble render FAIL {type(e).__name__}: {e}")
+                        say(f"  assemble preview FAIL {type(e).__name__}: {e}")
                 else:
                     say("  assemble candidates: none")
             app._drop_panes()

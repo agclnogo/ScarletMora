@@ -236,9 +236,9 @@ def assemble(out_dir: str, src_dir: str, lyrics_path: str, dst: str = "render",
     }
 
 
-# ====================================================================== 拼句子
+# ====================================================================== 人力试作
 # edit.json の items（source / start / end / kind / lead）を直接レンダリングする。
-# 「拼句子」タブの試聴と書き出しは両方ここを通すので、音の作り方が一致する。
+# 「人力试作」タブの試聴と書き出しは両方ここを通すので、音の作り方が一致する。
 
 def _item_missing(it: dict) -> bool:
     return (not str(it.get("source") or "").strip()) or (it.get("kind") == "missing")
@@ -251,6 +251,17 @@ def _source_audio(cache: dict, src_dir: str, source: str):
     return cache[key]
 
 
+def _explicit_at(it: dict) -> float | None:
+    """item に明示的なタイムライン位置（秒）があれば返す。"""
+    v = (it or {}).get("at", None)
+    if v is None or v == "":
+        return None
+    try:
+        return max(0.0, float(v))
+    except (TypeError, ValueError):
+        return None
+
+
 def render_items(items: list[dict], src_dir: str, head: float = 0.008,
                  tail: float = 0.015, fade_ms: float = 5.0,
                  crossfade_ms: float = 8.0, target_db: float = -18.0,
@@ -259,8 +270,10 @@ def render_items(items: list[dict], src_dir: str, head: float = 0.008,
                  ) -> tuple[np.ndarray, int, list[dict]]:
     """items 1 本ぶんを波形にする。
 
-    item: {"mora","source","start","end","kind","sub_from","lead",...}
+    item: {"mora","source","start","end","kind","sub_from","lead","at",...}
       lead … 直前の音との間に空ける無音（秒）。0 ならクロスフェードで繋ぐ。
+      at   … タイムライン上の絶対位置（秒）。ある場合は lead より優先する。
+             自由配置（隙間・重なり）を許すため、重なった部分は加算ミックスする。
     戻り値: (audio, sr, 各 item の out_start/out_end 付きメタ)
     """
     cache = cache if cache is not None else {}
@@ -304,22 +317,33 @@ def render_items(items: list[dict], src_dir: str, head: float = 0.008,
         return np.zeros(1, dtype=np.float32), sr_out, []
 
     leads = [max(0.0, float(it.get("lead") or 0.0)) for it in items]
-    total = (sum(len(s) for s in segs) + xf * 4
-             + sum(int(lead * sr_out) for lead in leads) + 64)
-    out = np.zeros(max(1, total), dtype=np.float32)
 
+    # 1 パス目: 各 item の開始サンプルを決める（at があれば絶対配置）。
+    starts: list[int] = []
     cursor = 0
+    for i, (it, seg) in enumerate(zip(items, segs)):
+        at = _explicit_at(it)
+        if at is not None:
+            start = int(round(at * sr_out))
+        elif i == 0:
+            start = 0
+        elif leads[i] > 0:
+            start = cursor + int(leads[i] * sr_out)
+        else:
+            missing = _item_missing(it)
+            prev_missing = _item_missing(items[i - 1])
+            xf_here = xf if (not missing and not prev_missing) else 0
+            start = max(0, cursor - xf_here)
+        starts.append(start)
+        cursor = max(cursor, start + len(seg))
+
+    out = np.zeros(max(1, cursor + 64), dtype=np.float32)
+    prev_end = 0
     meta: list[dict] = []
     for i, (it, seg) in enumerate(zip(items, segs)):
+        start = starts[i]
         missing = _item_missing(it)
         prev_missing = i > 0 and _item_missing(items[i - 1])
-        xf_here = xf if (i > 0 and not missing and not prev_missing
-                         and leads[i] <= 0) else 0
-        start = 0 if i == 0 else max(0, cursor - xf_here)
-        if i > 0 and leads[i] > 0:
-            start = cursor + int(leads[i] * sr_out)
-            xf_here = 0
-
         seg = seg.copy()
         if i == 0:
             seg = _fade_in(seg, sr_out, max(fade_ms, 2.0))
@@ -327,8 +351,26 @@ def render_items(items: list[dict], src_dir: str, head: float = 0.008,
             seg = _fade_out(seg, sr_out, max(fade_ms, 8.0))
         if not missing:
             seg = _normalize(seg, target_db)
-        _place(out, seg, start, xf_here)
 
+        explicit = _explicit_at(it) is not None
+        overlap = start < prev_end
+        if explicit and overlap:
+            ov = prev_end - start
+            if (ov <= xf and not missing and not prev_missing
+                    and leads[i] <= 0 and start > 0):
+                # 小さな重なりは等パワークロスフェード
+                _place(out, seg, start, min(xf, int(ov)))
+            else:
+                # 自由配置の重なりは音を消さず加算する
+                end = min(len(out), start + len(seg))
+                if end > start:
+                    out[start:end] += seg[: end - start]
+        else:
+            xf_here = xf if (i > 0 and not missing and not prev_missing
+                             and leads[i] <= 0 and start > 0) else 0
+            _place(out, seg, start, xf_here)
+
+        prev_end = max(prev_end, start + len(seg))
         row = dict(it)
         row.update({
             "out_start": round(start / sr_out, 3),
@@ -336,16 +378,31 @@ def render_items(items: list[dict], src_dir: str, head: float = 0.008,
             "missing": missing,
         })
         meta.append(row)
-        cursor = start + len(seg)
 
-    return out[:cursor], sr_out, meta
+    out = np.clip(out[:cursor], -1.0, 1.0).astype(np.float32)
+    return out, sr_out, meta
+
+
+def audible_tracks(tracks: list[dict]) -> list[dict]:
+    """Solo / Mute を反映した「鳴らす・書き出す」トラック一覧。
+
+    Solo が 1 本でもあれば Solo だけ。無ければ Mute されていない全部。
+    """
+    tracks = [t for t in (tracks or []) if isinstance(t, dict)]
+    solo = [t for t in tracks if t.get("solo")]
+    if solo:
+        return solo
+    return [t for t in tracks if not t.get("mute")]
 
 
 def render_edit(out_dir: str, src_dir: str, tracks: list[dict], dst: str = "render",
                 head: float = 0.008, tail: float = 0.015, fade_ms: float = 5.0,
                 crossfade_ms: float = 8.0, target_db: float = -18.0,
                 slot: float = 0.22, line_gap: float = 0.45) -> dict:
-    """edit.json の tracks を書き出す。出力は assemble() と同じ形。"""
+    """edit.json の tracks を書き出す。出力は assemble() と同じ形。
+
+    Solo / Mute はここで反映する（Solo があれば Solo だけ、無ければ Mute 以外）。
+    """
     out_dir_full = os.path.join(out_dir, dst)
     os.makedirs(out_dir_full, exist_ok=True)
 
@@ -357,7 +414,7 @@ def render_edit(out_dir: str, src_dir: str, tracks: list[dict], dst: str = "rend
     sub_total: dict[str, int] = {}
     lines = 0
 
-    for ln, tr in enumerate(tracks or [], 1):
+    for ln, tr in enumerate(audible_tracks(tracks), 1):
         items = list((tr or {}).get("items") or [])
         if not items:
             continue

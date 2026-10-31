@@ -406,13 +406,13 @@ class Library:
                           tail=tail, crossfade_ms=crossfade_ms, target_db=target_db,
                           slot=slot, allow_sub=allow_sub)
 
-    # ------------------------------------------------------------ 拼句子 edit
+    # ------------------------------------------------------------ 人力试作 edit
     @property
     def edit_path(self) -> str:
         return os.path.join(self.path, EDIT_NAME)
 
     def load_edit(self) -> dict:
-        """edit.json（拼句子のトラック）を読む。無ければ空で返す。"""
+        """edit.json（人力试作のトラック）を読む。無ければ空で返す。"""
         try:
             with open(self.edit_path, encoding="utf-8") as f:
                 data = json.load(f) or {}

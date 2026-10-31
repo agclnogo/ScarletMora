@@ -11,6 +11,7 @@ from tkinter import ttk
 from types import SimpleNamespace
 
 from . import theme as T
+from .core import kana as K
 from .core.audio import read_audio
 from .core.store import read_marks
 from .library import Library
@@ -57,9 +58,9 @@ class BankPane(tk.Frame):
         e.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
         e.bind("<KeyRelease>", lambda _ev: self.fill_mora_list())
         self.mlist = ttk.Treeview(left, columns=("n",), show="tree", selectmode="browse")
-        self.mlist.column("#0", width=96)
+        self.mlist.column("#0", width=118)
         self.mlist.column("n", width=54, anchor="e")
-        self.mlist.heading("#0", text="音")
+        self.mlist.heading("#0", text="音（罗马音）")
         self.mlist.heading("n", text="条数")
         self.mlist.grid(row=2, column=0, sticky="nsew", padx=(8, 0), pady=(0, 10))
         msb = ttk.Scrollbar(left, orient="vertical", command=self.mlist.yview)
@@ -158,12 +159,13 @@ class BankPane(tk.Frame):
             self._select_mora(first)
 
     def fill_mora_list(self) -> None:
-        q = (self.v_filter.get() or "").strip()
+        q = (self.v_filter.get() or "").strip().lower()
         self.mlist.delete(*self.mlist.get_children())
         for mora, lst in sorted(self.by_mora.items(), key=lambda kv: (-len(kv[1]), kv[0])):
-            if q and q not in mora:
+            label = K.mora_label(mora)
+            if q and q not in mora.lower() and q not in label.lower():
                 continue
-            self.mlist.insert("", "end", iid=mora, text=mora, values=(len(lst),))
+            self.mlist.insert("", "end", iid=mora, text=label, values=(len(lst),))
         if self.cur_mora and self.mlist.exists(self.cur_mora):
             self.mlist.selection_set(self.cur_mora)
             self.mlist.see(self.cur_mora)
@@ -197,7 +199,7 @@ class BankPane(tk.Frame):
                                     r["pos"], r["flags"]))
         self._takes = lst
         clean = sum(1 for r in lst if not r["flags"])
-        self.lbl_cur.configure(text=self.cur_mora or "—")
+        self.lbl_cur.configure(text=K.mora_label(self.cur_mora) if self.cur_mora else "—")
         self.lbl_cur_sub.configure(
             text=f"{len(lst)} 条候选 · 干净 {clean} 条" if self.cur_mora else "")
         if lst:

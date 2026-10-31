@@ -8,6 +8,7 @@ import glob
 import os
 
 from .. import paths
+from . import kana as K
 from .store import read_marks
 
 
@@ -113,7 +114,7 @@ def _write_index_html(out_dir: str, rows: list[dict], cnt=None, clean=None) -> N
 
     cnt = cnt or collections.Counter(r["mora"] for r in rows)
     clean = clean or collections.Counter(r["mora"] for r in rows if not r["flags"])
-    moras = [{"mora": k, "n": v, "clean": clean.get(k, 0)}
+    moras = [{"mora": k, "label": K.mora_label(k), "n": v, "clean": clean.get(k, 0)}
              for k, v in sorted(cnt.items(), key=lambda x: (-x[1], x[0]))]
     payload = json.dumps({"moras": moras, "rows": rows}, ensure_ascii=False)
     html = _INDEX_TPL.replace("/*__DATA__*/null", payload)
@@ -154,7 +155,7 @@ _INDEX_TPL = r"""<!DOCTYPE html>
 </style></head><body>
 <header><h1>● 音库索引</h1><span id="sum"></span>
   <span style="margin-left:auto;color:var(--dim)">点左边的音试听 clips\&lt;音&gt;.wav</span></header>
-<main><div id="left"><input id="q" placeholder="筛选（音 / 来源）"></div>
+<main><div id="left"><input id="q" placeholder="筛选（假名 / 罗马音 / 来源）"></div>
 <div id="right">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
     <span id="cur" class="big"></span><span id="curinfo" style="color:var(--dim)"></span>
@@ -173,13 +174,14 @@ const left = document.getElementById('left'), q = document.getElementById('q');
 const tb = document.getElementById('tb'), au = document.getElementById('au');
 let sel = null, list = [];
 function drawList(){
-  const kw = q.value.trim();
-  list = moras.filter(m => !kw || m.mora.includes(kw));
+  const kw = q.value.trim().toLowerCase();
+  list = moras.filter(m => !kw || m.mora.includes(kw) ||
+                           (m.label || '').toLowerCase().includes(kw));
   [...left.querySelectorAll('.m')].forEach(e => e.remove());
   for (const m of list){
     const d = document.createElement('div');
     d.className = 'm' + (m.mora === sel ? ' on' : '');
-    d.innerHTML = `<span class="big">${m.mora}</span>` +
+    d.innerHTML = `<span class="big">${m.label || m.mora}</span>` +
                   `<span class="num">${m.n} 条 · 干净 ${m.clean}</span>`;
     d.onclick = () => pick(m.mora);
     left.appendChild(d);
@@ -187,7 +189,8 @@ function drawList(){
 }
 function pick(mora){
   sel = mora; drawList();
-  document.getElementById('cur').textContent = mora;
+  const cur = moras.find(x => x.mora === mora);
+  document.getElementById('cur').textContent = cur ? (cur.label || mora) : mora;
   const rs = rows.filter(r => r.mora === mora);
   const cl = rs.filter(r => !r.flags).length;
   document.getElementById('curinfo').textContent = `${rs.length} 条候选 · 干净 ${cl} 条`;

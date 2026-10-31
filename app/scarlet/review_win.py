@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from . import theme as T
+from .core import kana as K
 from .core.audio import read_audio
 from .core.store import Mark, read_marks, write_audacity_labels, write_marks
 from .library import Library, safe_name
@@ -227,7 +228,8 @@ class ReviewPane(tk.Frame):
         cols = ("i", "mora", "start", "end", "dur", "conf", "flag")
         self.tbl = ttk.Treeview(right, columns=cols, show="headings", height=14,
                                 selectmode="extended")
-        for c, t, w, anchor in (("i", "#", 36, "center"), ("mora", "音", 52, "center"),
+        for c, t, w, anchor in (("i", "#", 36, "center"),
+                                ("mora", "音（罗马音）", 78, "center"),
                                 ("start", "起点", 74, "e"), ("end", "终点", 74, "e"),
                                 ("dur", "时长", 62, "e"), ("conf", "置信", 56, "e"),
                                 ("flag", "标记", 66, "w")):
@@ -355,7 +357,7 @@ class ReviewPane(tk.Frame):
         self.tbl.delete(*self.tbl.get_children())
         for i, m in enumerate(self.marks):
             self.tbl.insert("", "end", iid=str(i), tags=("flag",) if m.flags else (),
-                            values=(i, m.mora, f"{m.start:.3f}", f"{m.end:.3f}",
+                            values=(i, K.mora_label(m.mora), f"{m.start:.3f}", f"{m.end:.3f}",
                                     f"{m.dur * 1000:.0f}", f"{m.conf:.2f}", m.flags))
         if self.marks:
             self._sync_table_sel(max(0, self.wave.sel))
@@ -469,7 +471,9 @@ class ReviewPane(tk.Frame):
             return
         m = self.marks[i]
         self.lbl_mora.configure(text=m.mora)
-        self.lbl_phones.configure(text=f"/{m.phones}/   句 {m.phrase}   #{i}")
+        rom = K.mora_romaji(m.mora)
+        self.lbl_phones.configure(
+            text=f"{rom + '   ' if rom else ''}/{m.phones}/   句 {m.phrase}   #{i}")
         self.kv["起点"].configure(text=f"{m.start:.3f}s", fg=T.FG)
         self.kv["终点"].configure(text=f"{m.end:.3f}s", fg=T.FG)
         self.kv["时长"].configure(text=f"{m.dur * 1000:.0f}ms", fg=T.FG)
@@ -623,7 +627,7 @@ class ReviewPane(tk.Frame):
             m = self.marks[i]
             self.wave.center_on(m.start, m.end)
             self.lbl_status.configure(
-                text=f"已聚焦 #{i} {m.mora}  {m.start:.3f}–{m.end:.3f}s")
+                text=f"已聚焦 #{i} {K.mora_label(m.mora)}  {m.start:.3f}–{m.end:.3f}s")
 
     def _fit(self) -> None:
         self.wave.fit()
