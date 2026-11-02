@@ -1,4 +1,4 @@
-ScarletMora 1.1  —  音素裁切音库管理器
+ScarletMora 1.1.1  —  音素裁切音库管理器
 素材 → 强制对齐 → 切点校对 → モーラ切片 → 拼接
 单窗口：上面选音库，下面四个大标签，切点校对 / 音库索引 / 人力试作都直接显示在窗口里。
 仓库 / 用户版下载： https://github.com/agclnogo/ScarletMora
@@ -7,6 +7,8 @@ ScarletMora 1.1  —  音素裁切音库管理器
 
 【启动】
   双击 ScarletMora.exe。不用命令行，不开网页，也不弹小窗。
+  用户版解压后 models\（声学模型 361MB）和 app\ 都已经在里面，别删。分析要用的
+  Python + torch 还是得自己装一次，见下面【分析】。
 
 【窗口结构】
   顶部   ● ScarletMora   音库 [下拉]   ＋新建音库   检查环境  帮助
@@ -138,6 +140,13 @@ ScarletMora 1.1  —  音素裁切音库管理器
   「重新分析」默认只算未分析；选「全部重算」会覆盖已校对过的切点。
   换电脑：装好 Python 和上面三个包即可；也可在 settings.json 的 "python" 写死路径。
 
+  声学模型（约 361MB）用户版里已经放在 models\japanese-hubert-base-phoneme-ctc-v4\，
+  不用另外下载。只有模型被删掉、或者你把它挪到别处时，点「分析」才会弹窗：
+      「选择模型文件夹…」 选模型本体、models\ 或它的上一级都行（自动往下找）
+      「下载页」           在浏览器打开 Hugging Face 页面
+      「复制下载命令」     复制 hf download 命令，在命令提示符里跑
+  选好的位置记在 settings.json 的 "model"，以后不再问。
+
 【快捷键】
   空格 播放/暂停 · Ctrl+S 保存 · Ctrl+Z 撤销 · Ctrl+Y 重做 · PageUp/PageDown 换轨/换曲 · Ctrl+L 日志
   （在输入框里打字时不会被这些快捷键打断）
@@ -146,15 +155,16 @@ ScarletMora 1.1  —  音素裁切音库管理器
   ScarletMora.exe    入口
   app\                  程序本体（worker.py 要靠外部 Python 跑分析，别删）
   libraries\<音库名>\    一个音库一个文件夹，可整体拷走/备份
-  models\               声学模型（361MB，各音库共用）
+  models\               声学模型（361MB，用户版已自带，别删；也可放别处用弹窗指定）
   logs\                 运行日志
-  settings.json         上次打开的音库、外部 Python 路径
+  settings.json         上次打开的音库、外部 Python 路径、声学模型位置
 
   音库内部：library.json（唯一真源）· edit.json（人力试作）· audio\ · transcript.txt ·
             marks\ labels\ · project.json · clips\ clips_all\ · render\ · plan\
 
 【出问题】
   分析报「缺少依赖」   右上「检查环境」，按提示装包
+  分析报「缺少模型」   弹窗里点「选择模型文件夹…」选已有的模型目录，或按「复制下载命令」下载
   没声音               音量/设备可能被别的程序占用；状态栏会写「播放失败」
   搬动过源文件夹       用「引用」模式的音库会断链，重新导入该文件夹即可
   想看细节             Ctrl+L 或右下「日志」

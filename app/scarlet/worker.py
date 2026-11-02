@@ -30,10 +30,14 @@ def cmd_align(a) -> int:
     lib = Library(a.library)
     lib.load()
 
-    model_dir = a.model or paths.default_model_dir()
-    if not os.path.isdir(model_dir):
-        emit(f"ERROR モデルが無い: {model_dir}")
-        emit("ERROR `ScarletMora\\models` にモデルを置くか、--model で指定して")
+    # --model（GUI が選択した場所）→ settings.json → models\ の順で探す
+    model_dir = paths.normalize_model_path(a.model) or paths.find_model_dir()
+    problem = paths.model_problem(model_dir)
+    if problem:
+        # GUI 側でも同じ案内を出すが、worker を直接叩いたとき用にここでも出す
+        emit(f"ERROR モデルが無い: {model_dir or paths.default_model_dir()}（{problem}）")
+        emit(f"ERROR {paths.MODEL_DOWNLOAD_CMD}")
+        emit(f"ERROR 下载页: {paths.MODEL_URL}")
         return 2
 
     want = [s for s in (a.only or "").split(",") if s.strip()]

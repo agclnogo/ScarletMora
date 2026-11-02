@@ -82,11 +82,124 @@ def models_dir() -> str:
 
 
 def default_model_dir() -> str:
-    return os.path.join(models_dir(), "japanese-hubert-base-phoneme-ctc-v4")
+    return os.path.join(models_dir(), MODEL_NAME)
 
 
 def logs_dir() -> str:
     return _ensure(os.path.join(app_root(), "logs"))
+
+
+# --------------------------------------------------------------------- 声学模型
+# モデルはリポジトリには入れないが、ユーザー版 zip には同梱している（361MB）。
+#   models\<MODEL_NAME>\        ← 既定（zip に入っている）
+#   settings.json の "model"    ← ユーザーが選んだ場所（モデルを別に置いた場合）
+# のどちらでもよい。GUI の「选择模型文件夹」はここに保存する。
+MODEL_NAME = "japanese-hubert-base-phoneme-ctc-v4"
+MODEL_URL = "https://huggingface.co/prj-beatrice/japanese-hubert-base-phoneme-ctc-v4"
+MODEL_FILES = ("config.json", "vocab.json")
+MODEL_WEIGHTS = (".safetensors", ".bin", ".h5")
+MODEL_DOWNLOAD_CMD = (
+    "hf download prj-beatrice/japanese-hubert-base-phoneme-ctc-v4 "
+    f"--local-dir models\\{MODEL_NAME}"
+)
+
+
+def model_setting() -> str:
+    """settings.json に保存されたモデルの場所（未設定なら空）。"""
+    return str(load_settings().get("model") or "").strip()
+
+
+def set_model_dir(path: str) -> None:
+    set_setting("model", path or "")
+
+
+def model_problem(path: str) -> str:
+    """モデルフォルダとして使えるか。使えるなら ""、駄目なら理由を返す。
+
+    フォルダがあるだけ（空 / 途中で切れたダウンロード）では足りないので、
+    config.json・vocab.json・重みの 3 つが揃っているかまで見る。
+    """
+    if not path:
+        return "没有指定模型文件夹"
+    if not os.path.isdir(path):
+        return "文件夹不存在"
+    missing = [n for n in MODEL_FILES if not os.path.isfile(os.path.join(path, n))]
+    if missing:
+        return "缺少 " + " / ".join(missing)
+    try:
+        names = os.listdir(path)
+    except OSError as e:
+        return f"读不了: {e}"
+    if not any(n.endswith(MODEL_WEIGHTS) for n in names):
+        return "缺少权重文件（model.safetensors）"
+    return ""
+
+
+def is_model_dir(path: str) -> bool:
+    return not model_problem(path)
+
+
+def normalize_model_path(path: str) -> str:
+    """選ばれたフォルダを実際のモデルフォルダに寄せる。
+
+    モデル本体 / その親（models\）/ さらにその親（アプリのフォルダ）の
+    どれを選んでも通す。どれも駄目なら、いちばん「それらしい」ものを返す
+    （理由の表示に使う）。
+    """
+    p = (path or "").strip().strip('"')
+    if not p:
+        return ""
+    p = os.path.abspath(os.path.expanduser(p))
+    cands = [p, os.path.join(p, MODEL_NAME), os.path.join(p, "models", MODEL_NAME)]
+    for c in cands:
+        if is_model_dir(c):
+            return c
+    for c in cands:
+        if os.path.isdir(c):
+            return c
+    return p
+
+
+def find_model_dir() -> str:
+    r"""使えるモデルフォルダを返す。どれも駄目なら ""。
+
+    順番: settings.json → models\<MODEL_NAME> → models\ 直下のサブフォルダ。
+    （フォルダ名を変えていても models\ の下なら拾う）
+    """
+    cands = [model_setting(), default_model_dir()]
+    try:
+        for name in sorted(os.listdir(models_dir())):
+            sub = os.path.join(models_dir(), name)
+            if os.path.isdir(sub):
+                cands.append(sub)
+    except OSError:
+        pass
+    seen: set[str] = set()
+    for raw in cands:
+        if not raw:
+            continue
+        p = normalize_model_path(raw)
+        if p in seen:
+            continue
+        seen.add(p)
+        if is_model_dir(p):
+            return p
+    return ""
+
+
+def model_hint() -> str:
+    """モデルが無いときの案内（ダイアログ / ログ用）。"""
+    return (
+        "分析（CTC 对齐）需要声学模型，约 361MB。\n"
+        "用户版解压后 models\\ 里已经带着，被删掉或挪走了才会走到这里。\n\n"
+        f"① 自动找的位置：\n   {default_model_dir()}\n\n"
+        "② 模型放在别的地方也行，用「选择模型文件夹」指定一次\n"
+        "   （会记进 settings.json 的 \"model\"，以后不用再选）。\n\n"
+        "重新下载（任意 Python 环境里）：\n"
+        "   pip install huggingface_hub\n"
+        f"   {MODEL_DOWNLOAD_CMD}\n\n"
+        f"下载页：{MODEL_URL}"
+    )
 
 
 # --------------------------------------------------------------------- 設定

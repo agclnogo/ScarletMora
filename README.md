@@ -5,13 +5,19 @@
 Windows 桌面程序，Python + Tkinter 编写，单窗口，四个主标签：
 **切点校对** / **音库索引** / **人力试作** / **音库管理**。
 
-当前版本：**1.1.0**（切点校对 / 音库索引 / 人力试作 / 音库管理 四个主功能）
+当前版本：**1.1.1**（切点校对 / 音库索引 / 人力试作 / 音库管理 四个主功能）
 
 「人力试作」（旧名「拼句子」）已返工验收，**1.1.0 起正式纳入**。
 
+**1.1.1** 修的是用户版第一次就撞墙的问题：发行包以前不含声学模型，解压后点
+「分析」只会弹「找不到声学模型」。现在 `models\` 直接打进 zip，解压即用；
+模型被删掉或放在别处时，才会弹出选择窗口（选过的路径记进 `settings.json`）。
+
 - 仓库：<https://github.com/agclnogo/ScarletMora>
 - 用户版下载：<https://github.com/agclnogo/ScarletMora/releases/latest>
-  （`ScarletMora-1.1.0-win64.zip`，解压后 exe 旁边的 `app/` 文件夹不要删）
+  （`ScarletMora-1.1.1-win64.zip`，约 470MB，解压即用）
+- 用户版里已经带好声学模型（`models\`，361MB）和运行用的 `app\` 文件夹，两个都别删；
+  另外还需要本机装 Python + torch 才能跑分析，见下方「运行环境」
 
 > 本仓库只放源码和构建脚本。exe、声学模型、个人音库都不进仓库，
 > 说明见下方「仓库里有什么 / 没有什么」。
@@ -106,11 +112,13 @@ pip install transformers
 
 ## 声学模型
 
-分析需要把模型放到：
+**用户版不用管这一步** —— `ScarletMora-1.1.1-win64.zip` 里已经把模型放在
 
 ```text
 models\japanese-hubert-base-phoneme-ctc-v4\
 ```
+
+了（解压后别删）。下面是从源码跑、或者模型被删掉时怎么补。
 
 模型来自 Hugging Face（Apache-2.0）：
 
@@ -130,6 +138,19 @@ huggingface-cli download prj-beatrice/japanese-hubert-base-phoneme-ctc-v4 --loca
 ```
 
 下载完成后目录里应有 `config.json`、`model.safetensors`、`preprocessor_config.json` 等文件（约 361MB）。
+
+**不放 `models\` 也可以**：点「分析」时如果找不到模型，会弹窗让你选模型文件夹
+（选模型本体、`models\`、甚至上一级都行，会自动往下找
+`japanese-hubert-base-phoneme-ctc-v4`）。选过的路径会记进 `settings.json` 的
+`"model"`，下次不再问。也可以手写：
+
+```json
+{ "model": "D:\\somewhere\\japanese-hubert-base-phoneme-ctc-v4" }
+```
+
+判断「能用」的条件是这三样齐了：`config.json` / `vocab.json` / 权重
+（`model.safetensors` 或 `pytorch_model.bin`）。文件夹空的、下载到一半的都会
+在弹窗里写明缺什么。
 
 ---
 
@@ -183,8 +204,9 @@ app/
     worker.py            外部 Python 分析入口
     core/                对齐、切片、拼接、导出、kana
                           （人力试作用 assemble.render_items / render_edit）
-build.bat                打包脚本
-models/                  声学模型（不进仓库）
+build.bat                打包脚本（exe → 自检 → 打用户版 zip）
+make_release.py          打用户版 zip（exe + app\ + models\ + 说明，模型一起带上）
+models/                  声学模型（不进仓库；打用户版 zip 时会打进去）
 libraries/               音库（不进仓库，首次运行生成）
 workdir/                 临时分析产物（不进仓库）
 logs/                    日志（不进仓库）
@@ -200,7 +222,7 @@ logs/                    日志（不进仓库）
 **进仓库：**
 
 - `app/` 源码
-- `build.bat`
+- `build.bat` / `make_release.py`
 - `requirements.txt` / `requirements-analysis.txt`
 - `说明.txt` / `开发任务.txt`
 - `README.md`
@@ -209,8 +231,8 @@ logs/                    日志（不进仓库）
 
 | 内容 | 原因 | 去哪拿 |
 |---|---|---|
-| `ScarletMora.exe`、`*.exe.bak` | 约 99MiB，接近 GitHub 单文件上限 | GitHub Releases（发行包 `ScarletMora-1.1.0-win64.zip`） |
-| `models/` | 约 361MB | 按上面的 Hugging Face 链接下载 |
+| `ScarletMora.exe`、`*.exe.bak` | 约 99MiB，接近 GitHub 单文件上限 | GitHub Releases（发行包 `ScarletMora-1.1.1-win64.zip`） |
+| `models/` | 约 361MB，二进制权重 | **已打进发行包**（解压即用）；源码开发另按上面的 Hugging Face 链接下载 |
 | `libraries/` | 个人音源和切点数据，可能涉及版权 | 自己导入 |
 | `workdir/` | 分析临时产物，可重建 | 运行时生成 |
 | `logs/`、`settings.json` | 本机运行记录和绝对路径 | 运行时生成 |
@@ -232,7 +254,7 @@ logs/                    日志（不进仓库）
 
 - 播放依赖 Windows MCI，只支持 wav
 - CTC 对齐需要本机 Python + torch/transformers，首次加载模型约 10–30 秒
-- 模型约 361MB，不随仓库分发
+- 模型约 361MB，不进源码仓库；用户版 zip 里已内置
 - 人力试作导出的淡入淡出/交叉淡化/响度参数暂固定为与「拼接成歌」相同
 
 ---

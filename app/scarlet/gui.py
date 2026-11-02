@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import traceback
+import webbrowser
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -443,7 +444,25 @@ class App(tk.Tk):
         txt += ("\n\n可以运行 CTC 对齐分析。" if ok else
                 "\n\n分析功能需要 torch / transformers / numpy。\n"
                 "安装（命令提示符里）：\n    pip install torch transformers numpy")
+        mdir = paths.find_model_dir()
+        if mdir:
+            txt += f"\n\n模型: {mdir}"
+        else:
+            want = paths.normalize_model_path(paths.model_setting()) or paths.default_model_dir()
+            txt += (f"\n\n模型: 未就绪（{want}）\n{paths.model_problem(want)}\n"
+                    "点「分析」时会让你选模型文件夹。")
         messagebox.showinfo("解析环境", txt, parent=self)
+
+    def ensure_model(self) -> str:
+        """使えるモデルフォルダを返す。無ければ案内を出してユーザーに選ばせる。"""
+        mdir = paths.find_model_dir()
+        if mdir:
+            return mdir
+        dlg = ModelDialog(self)
+        self.wait_window(dlg)
+        if dlg.result:
+            self.log(f"模型位置: {dlg.result}")
+        return dlg.result
 
     def analyze_current(self, only: list[str] | None = None) -> None:
         lib = self.lib
@@ -458,9 +477,8 @@ class App(tk.Tk):
             messagebox.showerror("缺少依赖", f"{py}\n{msg}\n\n需要: pip install torch "
                                             "transformers numpy", parent=self)
             return
-        if not os.path.isdir(paths.default_model_dir()):
-            messagebox.showerror("缺少模型", "找不到声学模型：\n" +
-                                 paths.default_model_dir(), parent=self)
+        model_dir = self.ensure_model()
+        if not model_dir:
             return
         if not only:
             todo = [t for t in lib.tracks if (t.get("text") or "").strip()]
@@ -484,7 +502,8 @@ class App(tk.Tk):
                                  "\n\nexe 旁边的 app\\scarlet\\ 文件夹别删。", parent=self)
             return
         args = [py, "-u", worker, "align", "--library", lib.path,
-                "--shift", str(lib.settings.get("shift", 0.02))]
+                "--shift", str(lib.settings.get("shift", 0.02)),
+                "--model", model_dir]
         if only:
             args += ["--only", ",".join(only)]
         self.set_busy(True)
@@ -853,6 +872,109 @@ class LogWindow(tk.Toplevel):
 
 
 # ====================================================================== 对话框
+class ModelDialog(tk.Toplevel):
+    """声学模型が無いときの案内。選ばれたモデルフォルダを .result に入れる。
+
+    モデル（361MB）はユーザー版 zip に同梱しているので、普通はここに来ない。
+    モデルを消した / 別の場所に置いた / ソースから動かしている場合の逃げ道。
+    「选择模型文件夹」で決めた場所は settings.json の "model" に保存するので、
+    次からは聞かれない。
+    """
+
+    def __init__(self, app: App):
+        super().__init__(app, bg=T.BG0)
+        self.app = app
+        self.result = ""
+        self.title("缺少声学模型")
+        self.transient(app)
+        self.grab_set()
+        self.resizable(False, False)
+        T.dark_titlebar(self)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        frm = tk.Frame(self, bg=T.BG0, padx=20, pady=16)
+        frm.pack(fill="both", expand=True)
+
+        tk.Label(frm, text="找不到声学模型", bg=T.BG0, fg=T.SCARLET_HI,
+                 font=("Microsoft YaHei UI", 14, "bold")).pack(anchor="w")
+        tk.Label(frm, text="做 CTC 对齐（「分析」）需要 japanese-hubert-base-phoneme-ctc-v4"
+                           "（约 361MB）。\n用户版解压后 models\\ 里就带着，"
+                           "被删掉、挪走或单独下载的放在别处时，在这里指一次就好。",
+                 bg=T.BG0, fg=T.FG2, font=T.FONT, wraplength=560,
+                 justify="left").pack(anchor="w", pady=(8, 0))
+
+        # いま探した場所と、その理由
+        now = paths.normalize_model_path(paths.model_setting()) or paths.default_model_dir()
+        problem = paths.model_problem(now)
+        box = tk.Frame(frm, bg=T.BG2, padx=12, pady=10)
+        box.pack(fill="x", pady=12)
+        tk.Label(box, text="自动查找的位置", bg=T.BG2, fg=T.DIM,
+                 font=T.FONT_S).pack(anchor="w")
+        tk.Label(box, text=now, bg=T.BG2, fg=T.FG2, font=T.FONT_MONO,
+                 wraplength=540, justify="left").pack(anchor="w", pady=(2, 0))
+        tk.Label(box, text=f"状态: {problem}", bg=T.BG2, fg=T.DIM,
+                 font=T.FONT_S).pack(anchor="w", pady=(4, 0))
+
+        tk.Label(frm, text="模型已经下载到别的地方也没关系 —— 选一次，路径会记进 settings.json。",
+                 bg=T.BG0, fg=T.FG2, font=T.FONT, wraplength=560,
+                 justify="left").pack(anchor="w")
+
+        bar = tk.Frame(frm, bg=T.BG0)
+        bar.pack(fill="x", pady=(14, 0))
+        T.ScarletButton(bar, "选择模型文件夹…", self.pick, kind="solid").pack(side="left")
+        T.ScarletButton(bar, "下载页", self.open_url, kind="ghost").pack(side="left", padx=8)
+        T.ScarletButton(bar, "复制下载命令", self.copy_cmd, kind="flat").pack(side="left")
+
+        foot = tk.Frame(frm, bg=T.BG0)
+        foot.pack(fill="x", pady=(14, 0))
+        self.lbl_hint = tk.Label(foot, text="", bg=T.BG0, fg=T.DIM, font=T.FONT_S,
+                                 wraplength=560, justify="left")
+        self.lbl_hint.pack(side="left", anchor="w")
+        T.ScarletButton(foot, "关闭", self.destroy, kind="flat").pack(side="right")
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    # ------------------------------------------------------------------ 操作
+    def _say(self, text: str, color: str = T.DIM) -> None:
+        self.lbl_hint.configure(text=text, fg=color)
+
+    def pick(self) -> None:
+        d = filedialog.askdirectory(parent=self, mustexist=True, title="选择模型文件夹")
+        if not d:
+            return
+        norm = paths.normalize_model_path(d)
+        problem = paths.model_problem(norm)
+        if problem:
+            self._say(f"这里还不是模型文件夹（{problem}）。\n"
+                      "里面需要有 config.json / vocab.json / model.safetensors，\n"
+                      f"或者选上一级（会自动找下面的 {paths.MODEL_NAME}）。",
+                      T.SCARLET_HI)
+            return
+        paths.set_model_dir(norm)
+        self.result = norm
+        self.destroy()
+
+    def open_url(self) -> None:
+        try:
+            webbrowser.open(paths.MODEL_URL)
+        except Exception:  # noqa: BLE001
+            self._say("打不开浏览器，手动复制这个地址：\n" + paths.MODEL_URL)
+        else:
+            self._say("已在浏览器打开下载页。下载后回来点「选择模型文件夹…」。")
+
+    def copy_cmd(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append("pip install huggingface_hub\n" + paths.MODEL_DOWNLOAD_CMD)
+        self._say("下载命令已复制。在命令提示符里跑，跑完回来点「选择模型文件夹…」。")
+
+    def destroy(self) -> None:
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        super().destroy()
+
+
 class NewLibraryDialog(tk.Toplevel):
     def __init__(self, app: App):
         super().__init__(app, bg=T.BG0)
@@ -1061,6 +1183,12 @@ class ImportDialog(tk.Toplevel):
 # ====================================================================== 入口
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if "--version" in argv or "-V" in argv:
+        # 版番号の確認用。GUI を開かずに即座に返す（release の検算に使う）
+        from . import __version__
+
+        print(f"ScarletMora {__version__}", flush=True)
+        return 0
     if "--selftest" in argv:
         return selftest()
     app = App()
@@ -1087,6 +1215,13 @@ def selftest() -> int:
     say(f"worker={wpath} ({'ok' if os.path.isfile(wpath) else 'MISSING'})")
     if not os.path.isfile(wpath):
         ok_all = False
+    # モデルは配布物に入れていないので、無くても自検は落とさない（情報だけ）
+    mdir = paths.find_model_dir()
+    if mdir:
+        say(f"model={mdir} (ok)")
+    else:
+        want = paths.normalize_model_path(paths.model_setting()) or paths.default_model_dir()
+        say(f"model=MISSING（{paths.model_problem(want)}）→ 分析首次会要你选择文件夹")
     libs = [l for l in Library.list_all() if l.tracks] or Library.list_all()
     say(f"libraries: {len(libs)}")
     if libs:
@@ -1122,16 +1257,20 @@ def selftest() -> int:
             rv = app._panes.get("review")
             if rv is not None:
                 say(f"  review marks={len(rv.marks)}")
-                try:
-                    from .core import kana as K
-                    kids = rv.tbl.get_children()
-                    ok_rl = bool(kids) and str(rv.tbl.item(kids[0], "values")[1]) \
-                        == K.mora_label(rv.marks[0].mora)
-                    say(f"  review table romaji {'ok' if ok_rl else 'FAIL'}")
-                    ok_all = ok_all and ok_rl
-                except Exception as e:  # noqa: BLE001
-                    ok_all = False
-                    say(f"  review table romaji FAIL {type(e).__name__}: {e}")
+                if not rv.marks:
+                    # 分析前の音庫（初回起動直後）は切点が無いのでここは飛ばす
+                    say("  review table romaji skip（曲目还没分析）")
+                else:
+                    try:
+                        from .core import kana as K
+                        kids = rv.tbl.get_children()
+                        ok_rl = bool(kids) and str(rv.tbl.item(kids[0], "values")[1]) \
+                            == K.mora_label(rv.marks[0].mora)
+                        say(f"  review table romaji {'ok' if ok_rl else 'FAIL'}")
+                        ok_all = ok_all and ok_rl
+                    except Exception as e:  # noqa: BLE001
+                        ok_all = False
+                        say(f"  review table romaji FAIL {type(e).__name__}: {e}")
                 # 波形の当たり判定: 本体=再生位置だけ / 音名帯の線=切点ドラッグ
                 try:
                     app.show_tab("review", force=True)

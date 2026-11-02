@@ -28,7 +28,7 @@ if exist "%LOCALAPPDATA%\Programs\Python\Python314\python.exe" (
     set PY=%LOCALAPPDATA%\Programs\Python\Python314\python.exe
 )
 
-echo [1/3] 检查 PyInstaller ...
+echo [1/4] 检查 PyInstaller ...
 "%PY%" -c "import PyInstaller" 2>nul
 if errorlevel 1 (
     echo     没装 PyInstaller。先跑：  "%PY%" -m pip install pyinstaller
@@ -41,7 +41,7 @@ if exist ScarletMora.exe (
     copy /y ScarletMora.exe ScarletMora.exe.bak >nul
 )
 
-echo [2/3] 打包中（2~4 分钟）...
+echo [2/4] 打包中（2~4 分钟）...
 "%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name ScarletMora ^
     --distpath . --workpath build\work --specpath build ^
@@ -66,7 +66,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [3/3] 自检 ...
+echo [3/4] 自检 ...
 if exist logs\selftest.txt del /q logs\selftest.txt
 "%~dp0ScarletMora.exe" --selftest
 echo.
@@ -80,6 +80,18 @@ if errorlevel 1 (
 
 if exist build rmdir /s /q build
 
+rem   用户版 zip = exe + app\ + models\ + 说明。models\ 忘了加，用户那边就是
+rem   「缺少模型」。这一步别跳过（只想出轻量包就手动跑 make_release.py --no-model）。
+echo [4/4] 打用户版 zip（含 models\，约 470MB，要一会儿）...
+"%PY%" make_release.py
+if errorlevel 1 (
+    echo.
+    echo 打 zip 失败（见上面）。模型没下载的话，按 README 的「声学模型」补。
+    pause
+    exit /b 1
+)
+
 echo.
-echo 完成：SELFTEST OK。exe 旁边那个 app\ 文件夹别删（分析靠它的 worker.py）。
+echo 完成：SELFTEST OK + 用户版 zip（ScarletMora-<版本>-win64.zip）。
+echo 用户解压后 app\ 和 models\ 都别删。
 pause
